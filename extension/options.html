@@ -12,7 +12,7 @@
       <a href="#privacy"><span>◇</span>隐私与使用</a>
     </nav>
     <div class="sidebar-note"><span class="small-flower">✳</span><strong>让好奇心，没有边界。</strong><p>保留原文，也保留你<br>探索世界的每一种可能。</p></div>
-    <div class="sidebar-bottom"><span class="status-dot"></span>本地优先<span class="version">v0.1.0</span></div>
+    <div class="sidebar-bottom"><span class="status-dot"></span>本地优先<span class="version">v0.2.0</span></div>
   </aside>
   <div class="options-content">
     <header class="topbar"><span>工作空间 <span class="breadcrumb-slash">/</span> 翻译偏好</span><span class="local-badge"><span class="status-dot"></span>仅保存在此浏览器</span></header>
@@ -27,7 +27,7 @@
           <div class="setting-row"><div><label for="showFloatingButton">页面悬浮工具栏</label><p>查看翻译进度，随时一键恢复原文。</p></div><label class="switch"><input type="checkbox" id="showFloatingButton" name="showFloatingButton"><span></span></label></div>
         </section>
         <section class="settings-card" id="services">
-          <div class="section-heading"><span class="section-number">02</span><div><h2>翻译服务</h2><p>快速查阅，或让 AI 帮你读得更深入。</p></div></div>
+          <div class="section-heading"><span class="section-number">02</span><div><h2>翻译服务</h2><p>设置默认服务；翻译时可在弹窗临时选择。</p></div></div>
           <div class="provider-cards" role="group" aria-label="翻译服务">
             <label class="provider-card"><input type="radio" name="provider" value="google"><span class="provider-icon google-icon">G</span><strong>Google 翻译</strong><span class="provider-sub">免 Key · 轻松试用</span><span class="radio-dot"></span></label>
             <label class="provider-card"><input type="radio" name="provider" value="google-cloud"><span class="provider-icon cloud-icon">☁</span><strong>Google Cloud</strong><span class="provider-sub">官方 API · 按量计费</span><span class="radio-dot"></span></label>
@@ -36,8 +36,15 @@
           <div id="google-config" class="provider-config"><div class="callout"><span>ⓘ</span><p>无需 API Key，即可尝试网页翻译。此服务使用非官方免 Key 接口，无稳定性承诺；需要可访问 Google 的网络。长期使用建议选择官方 API。</p></div></div>
           <div id="google-cloud-config" class="provider-config" hidden><div class="field"><label for="googleCloudKey">Google Cloud API Key</label><div class="password-field"><input type="password" id="googleCloudKey" name="googleCloudKey" placeholder="填写你的 Google Cloud API Key" autocomplete="off" spellcheck="false"><button type="button" class="reveal text-button" data-for="googleCloudKey">显示</button></div><p class="field-help">需在 Google Cloud 启用 Cloud Translation API v2 和计费。请限制 Key 仅用于该 API。</p></div></div>
           <div id="openai-config" class="provider-config" hidden>
+            <div class="field"><label for="defaultApiId">默认使用的 API</label><select id="defaultApiId" name="defaultApiId"></select><p class="field-help">弹窗、右键菜单和快捷键默认使用此 API 及它的默认模型。弹窗临时选择不会修改这里的默认值。</p></div>
+            <div class="api-manager">
+            <div class="api-manager-heading"><div class="field"><label for="api-profile">管理 API 配置</label><select id="api-profile"></select></div><button type="button" id="add-api" class="button secondary">＋ 添加 API</button><button type="button" id="delete-api" class="text-button danger">删除此 API</button></div>
+            <div class="field"><label for="apiName">API 名称</label><input id="apiName" maxlength="80" placeholder="例如：硅基流动、DeepSeek、公司内网" autocomplete="off"><p class="field-help">自定义名称，方便在翻译弹窗中区分服务商。</p></div>
             <div class="field"><label for="openaiEndpoint">API 地址 <span class="label-note">OpenAI 兼容</span></label><input type="url" id="openaiEndpoint" name="openaiEndpoint" placeholder="https://api.openai.com/v1" spellcheck="false"><p class="field-help">填写 Base URL 或完整 /chat/completions 地址；支持 HTTP / HTTPS、兼容服务和本地模型。</p><div id="http-warning" class="callout http-warning" role="note" hidden><span>⚠</span><p>HTTP 不加密传输，API Key 和待翻译文字可能被网络中的其他人读取或篡改。仅建议用于可信内网或自建服务，公网服务建议使用 HTTPS。</p></div></div>
-            <div class="form-grid"><div class="field"><label for="openaiKey">API Key</label><div class="password-field"><input type="password" id="openaiKey" name="openaiKey" placeholder="sk-…" autocomplete="off" spellcheck="false"><button type="button" class="reveal text-button" data-for="openaiKey">显示</button></div></div><div class="field"><label for="openaiModel">模型名称</label><input id="openaiModel" name="openaiModel" placeholder="例如 gpt-4.1-mini" spellcheck="false"><p class="field-help">填写服务商实际可用的模型 ID。</p></div></div>
+            <div class="field"><label for="openaiKey">API Key</label><div class="password-field"><input type="password" id="openaiKey" name="openaiKey" placeholder="填写此服务商的 API Key" autocomplete="off" spellcheck="false"><button type="button" class="reveal text-button" data-for="openaiKey">显示</button></div></div>
+            <div class="form-grid"><div class="field"><label for="apiModels">可用模型 <span class="label-note">每行一个</span></label><textarea id="apiModels" rows="4" spellcheck="false" placeholder="Qwen/Qwen2.5-7B-Instruct&#10;Qwen/Qwen3-8B"></textarea><p class="field-help">填写此 API 实际可用的模型 ID，最多 50 个。删除一行即可移除模型。</p></div><div class="field"><label for="apiDefaultModel">该 API 的默认模型</label><select id="apiDefaultModel"></select><p class="field-help">将此 API 设为默认或在弹窗切换到此 API 时，优先选中此模型。</p></div></div>
+            <p class="field-help">测试连接会测试当前正在编辑的 API 和它的默认模型；所有配置在点击“保存设置”后才会保存。</p>
+            </div>
             <div class="field"><label for="prompt">额外翻译要求 <span class="label-note">可选</span></label><textarea id="prompt" name="prompt" rows="3" maxlength="2000" placeholder="例如：保留技术术语，使用自然流畅的中文。"></textarea></div>
             <div class="callout"><span>◇</span><p>Key 只存储在本机插件中，网页无法读取。译文请求会发送给你配置的 API 服务商，并使用你的账户额度。公开分发时建议通过自建后端管理凭证。</p></div>
           </div>

@@ -146,7 +146,7 @@ export async function translateTexts(texts, settings, options = {}) {
 export class TranslationCache {
   constructor(limit = 500, ttl = 15 * 60 * 1000) { this.limit = limit; this.ttl = ttl; this.entries = new Map(); }
   key(text, settings) {
-    return JSON.stringify([settings.provider, settings.sourceLanguage, settings.targetLanguage, settings.openaiEndpoint, settings.openaiModel, settings.prompt, text]);
+    return JSON.stringify([settings.provider, settings.sourceLanguage, settings.targetLanguage, settings.activeApiId, settings.openaiEndpoint, settings.openaiModel, settings.prompt, text]);
   }
   get(key) {
     const entry = this.entries.get(key);

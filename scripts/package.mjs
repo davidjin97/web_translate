@@ -1,10 +1,11 @@
-import { cpSync, mkdirSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 await import("./check.mjs");
 const extension = fileURLToPath(new URL("../extension", import.meta.url));
 const destination = fileURLToPath(new URL("../dist/lingo", import.meta.url));
+const { version } = JSON.parse(readFileSync(new URL("../extension/manifest.json", import.meta.url), "utf8"));
 mkdirSync(destination, { recursive: true });
 cpSync(extension, destination, { recursive: true });
-execFileSync("zip", ["-r", "-q", "../lingo-v0.1.0.zip", "."], { cwd: destination });
-console.log(`Chrome unpacked extension: ${destination}\nZIP: ${fileURLToPath(new URL("../dist/lingo-v0.1.0.zip", import.meta.url))}`);
+execFileSync("zip", ["-r", "-q", `../lingo-v${version}.zip`, "."], { cwd: destination });
+console.log(`Chrome unpacked extension: ${destination}\nZIP: ${fileURLToPath(new URL(`../dist/lingo-v${version}.zip`, import.meta.url))}`);

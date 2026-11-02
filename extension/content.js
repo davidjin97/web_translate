@@ -213,6 +213,10 @@
     const all = [...entries.values()];
     return {
       enabled, paused, notice,
+      ...(enabled ? { selection: {
+        provider: settings.provider, sourceLanguage: settings.sourceLanguage, targetLanguage: settings.targetLanguage,
+        ...(settings.provider === "openai" ? { apiId: settings.apiId, model: settings.openaiModel } : {})
+      } } : {}),
       translated: all.filter(entry => entry.state === "translated").length,
       failed: all.filter(entry => entry.state === "failed").length,
       pending: all.filter(entry => ["queued", "translating"].includes(entry.state)).length,
@@ -319,5 +323,5 @@
     return true;
   });
   window.addEventListener("pagehide", stop);
-  globalThis.__lingoTranslator = { version: "0.1.0" };
+  globalThis.__lingoTranslator = { version: "0.2.0" };
 })();

@@ -31,3 +31,7 @@ export async function grantEndpoint(settings) {
   // Called directly by Save/Test's user gesture; no prior async work.
   if (!await chrome.permissions.request({ origins })) throw new Error("未授予 API 域名访问权限，设置未保存。");
 }
+export async function grantAllEndpoints(settings) {
+  const origins = [...new Set(settings.apiProfiles.map(api => endpointPermissionPattern(api.endpoint)))];
+  if (!await chrome.permissions.request({ origins })) throw new Error("未授予 API 域名访问权限，设置未保存。");
+}

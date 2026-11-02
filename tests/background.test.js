@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DEFAULT_SETTINGS } from "../extension/lib/settings.js";
+import { multiSettings } from "./ui-harness.js";
 
 function area(initial = {}) {
   const values = structuredClone(initial);
@@ -123,5 +124,95 @@ test("background API authorization, credentials and durable sessions", async t =
     assert.deepEqual(result.data.translations, ["你好"]);
     assert.ok(origins.every(origin => origin.length === 1 && origin[0] === "http://192.168.1.10/*"));
     await f.send({ type: "CANCEL_SESSION", sessionId: started.data.sessionId });
+  });
+});
+
+test("named APIs route temporary selections securely and keep durable snapshots independent", async t => {
+  const f = fixture(), originalChrome = globalThis.chrome, originalFetch = globalThis.fetch;
+  globalThis.chrome = f.chrome;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"translations":["测试译文"]}' } }] }));
+  };
+  t.after(() => { globalThis.chrome = originalChrome; globalThis.fetch = originalFetch; });
+  f.chrome.storage.local.values.settings = multiSettings();
+  await f.restart();
+  let active;
+  const startSelection = async selection => {
+    f.chrome.tabs.sendMessage = async (id, message) => {
+      if (message.type === "LINGO_STATUS") return { enabled: false };
+      assert.deepEqual(message, { type: "LINGO_ACTION", action: "start" });
+      const result = await f.send({ type: "BEGIN_SESSION" }, { ...f.content, tab: { id } });
+      if (!result.ok) return { error: result.error };
+      active = result.data;
+      return { enabled: true };
+    };
+    return f.send({ type: "TAB_ACTION", tabId: 1, action: "start", selection }, f.ui);
+  };
+  await t.test("only configured selections are allowed and no credentials enter tab messages", async () => {
+    for (const selection of [{ apiId: "missing" }, { apiId: "beta", model: "qwen-small" }, { endpoint: "https://evil.example", key: "injected" }]) {
+      assert.equal((await startSelection(selection)).ok, false);
+    }
+    assert.equal((await f.send({ type: "BEGIN_SESSION", selection: { apiId: "beta" } })).ok, false);
+    assert.equal(requests.length, 0);
+  });
+  await t.test("non-default API must have domain permission before it can be selected", async () => {
+    f.chrome.permissions.contains = async ({ origins }) => !origins.includes("http://192.168.1.10/*");
+    assert.equal((await startSelection({ apiId: "beta", model: "local-a" })).ok, false);
+    assert.equal((await f.send({ type: "SAVE_SETTINGS", settings: multiSettings() }, f.ui)).ok, false);
+    f.chrome.permissions.contains = async () => true;
+  });
+  let selectedSession;
+  await t.test("selected API uses its own key, endpoint and model without changing defaults", async () => {
+    assert.equal((await startSelection({ apiId: "beta", model: "local-a" })).ok, true);
+    selectedSession = active.sessionId;
+    assert.equal(active.settings.apiId, "beta");
+    assert.equal(active.settings.openaiModel, "local-a");
+    assert.ok(!JSON.stringify(active).includes("test-key"));
+    assert.ok(!Object.hasOwn(active.settings, "apiProfiles"));
+    const durable = JSON.stringify(f.chrome.storage.session.values);
+    assert.ok(durable.includes("beta-test-key"));
+    assert.ok(!durable.includes("alpha-test-key"));
+    assert.ok(!durable.includes("apiProfiles"));
+    assert.equal((await f.send({ type: "TRANSLATE", sessionId: selectedSession, texts: ["Hello"] })).ok, true);
+    assert.equal(requests[0].url, "http://192.168.1.10:8000/v1/chat/completions");
+    assert.equal(requests[0].headers.Authorization, "Bearer beta-test-key");
+    assert.equal(requests[0].body.model, "local-a");
+    assert.equal(f.chrome.storage.local.values.settings.defaultApiId, "alpha");
+    assert.equal(f.chrome.storage.local.values.settings.apiProfiles[1].defaultModel, "local-b");
+  });
+  await t.test("saved profile edits and worker suspension do not change an active session", async () => {
+    const changed = multiSettings();
+    changed.apiProfiles[1].endpoint = "https://changed.example/v1";
+    changed.apiProfiles[1].key = "changed-test-key";
+    assert.equal((await f.send({ type: "SAVE_SETTINGS", settings: changed }, f.ui)).ok, true);
+    await f.restart();
+    assert.equal((await f.send({ type: "TRANSLATE", sessionId: selectedSession, texts: ["Another paragraph"] })).ok, true);
+    assert.equal(requests.at(-1).url, "http://192.168.1.10:8000/v1/chat/completions");
+    assert.equal(requests.at(-1).headers.Authorization, "Bearer beta-test-key");
+    assert.equal(requests.at(-1).body.model, "local-a");
+  });
+  await t.test("next default start ignores prior one-shot selection and model caches stay separate", async () => {
+    assert.equal((await startSelection(undefined)).ok, true);
+    assert.equal(active.settings.apiId, "alpha");
+    assert.equal(active.settings.openaiModel, "qwen-large");
+    await f.send({ type: "TRANSLATE", sessionId: active.sessionId, texts: ["Hello"] });
+    assert.equal(requests.at(-1).url, "https://alpha.example/v1/chat/completions");
+    assert.equal(requests.at(-1).headers.Authorization, "Bearer alpha-test-key");
+    const before = requests.length;
+    assert.equal((await startSelection({ apiId: "alpha", model: "qwen-small" })).ok, true);
+    await f.send({ type: "TRANSLATE", sessionId: active.sessionId, texts: ["Hello"] });
+    assert.equal(requests.length, before + 1);
+    assert.equal(requests.at(-1).body.model, "qwen-small");
+    await f.send({ type: "CANCEL_SESSION", sessionId: active.sessionId });
+  });
+  await t.test("connection testing can target a non-default API without saving it", async () => {
+    const before = structuredClone(f.chrome.storage.local.values.settings);
+    const result = await f.send({ type: "TEST_CONNECTION", settings: multiSettings(), selection: { apiId: "beta", model: "local-b" } }, f.ui);
+    assert.equal(result.ok, true);
+    assert.equal(requests.at(-1).headers.Authorization, "Bearer beta-test-key");
+    assert.equal(requests.at(-1).body.model, "local-b");
+    assert.deepEqual(f.chrome.storage.local.values.settings, before);
   });
 });

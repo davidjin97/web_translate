@@ -57,6 +57,16 @@ test("inserts translations under original paragraphs while preserving links and 
     assert.equal(p.lastElementChild.getAttribute("lang"), "zh-CN");
   } finally { await h.close(); }
 });
+test("page status reports only the current API/model selection, never credentials", async () => {
+  const h = harness('<p>A paragraph for the current model.</p>', { provider: "openai", activeApiId: "chosen-api", openaiModel: "chosen-model", openaiKey: "private-key", openaiEndpoint: "https://private.example/v1" });
+  try {
+    await h.action("start");
+    assert.deepEqual({ ...h.status().selection }, { provider: "openai", apiId: "chosen-api", model: "chosen-model", sourceLanguage: "auto", targetLanguage: "zh-CN" });
+    assert.ok(!JSON.stringify(h.status()).includes("private"));
+    await h.action("stop");
+    assert.equal(Object.hasOwn(h.status(), "selection"), false);
+  } finally { await h.close(); }
+});
 test("ignores inputs, code, controls, navigation, hidden and opted-out elements", async () => {
   const h = harness('<nav><p>Navigation links</p></nav><p translate="no">Private original</p><div contenteditable="true">Draft in progress</div><input value="secret"><textarea>private draft</textarea><pre><code>console.log("code")</code></pre><button>Do not translate</button><div style="display:none"><p>Hidden text</p></div><p>Translate only this visible paragraph.</p>');
   try { await h.action("start"); await until(() => h.status().translated === 1); assert.equal(h.translations().length, 1); assert.equal(h.requests.filter(r => r.type === "TRANSLATE").flatMap(r => r.texts).join(""), "Translate only this visible paragraph."); }

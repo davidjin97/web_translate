@@ -1,9 +1,10 @@
-import { DEFAULT_SETTINGS, normalizeSettings, publicSettings, endpointPermissionPattern, assertConfigured } from "./lib/settings.js";
+import { DEFAULT_SETTINGS, normalizeSettings, resolveTranslationSettings, publicSettings, endpointPermissionPattern, assertConfigured } from "./lib/settings.js";
 import { translateTexts, TranslationCache, TaskQueue } from "./lib/providers.js";
 
 const cache = new TranslationCache();
 const queue = new TaskQueue(2);
 const sessions = new Map();
+const pendingStarts = new Map();
 const ready = Promise.all([
   chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }),
   chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
@@ -32,6 +33,7 @@ async function cancelSession(id) {
 }
 
 async function cancelTab(tabId) {
+  pendingStarts.delete(tabId);
   await ready;
   const stored = await chrome.storage.session.get(null);
   const ids = new Set([
@@ -70,12 +72,20 @@ async function ensureContent(tabId) {
   }
 }
 
-async function actOnTab(tabId, action) {
+async function actOnTab(tabId, action, selection) {
   if (!Number.isInteger(tabId)) throw new Error("找不到当前标签页。");
+  if (!["start", "stop", "toggle", "retry"].includes(action)) throw new Error("未知的页面操作。");
   await ensureContent(tabId);
-  const result = await chrome.tabs.sendMessage(tabId, { type: "LINGO_ACTION", action }, { frameId: 0 });
-  if (result?.error) throw new Error(result.error);
-  return result;
+  // Only the trusted popup can choose overrides. The webpage receives neither
+  // the full profile nor the key; BEGIN_SESSION consumes this one-shot snapshot.
+  const snapshot = ["start", "toggle"].includes(action) ? resolveTranslationSettings(await loadSettings(), selection) : null;
+  if (action === "start") { assertConfigured(snapshot); await requireEndpointPermission(snapshot); }
+  if (snapshot) pendingStarts.set(tabId, snapshot);
+  try {
+    const result = await chrome.tabs.sendMessage(tabId, { type: "LINGO_ACTION", action }, { frameId: 0 });
+    if (result?.error) throw new Error(result.error);
+    return result;
+  } finally { if (pendingStarts.get(tabId) === snapshot) pendingStarts.delete(tabId); }
 }
 
 async function handle(message, sender) {
@@ -83,13 +93,20 @@ async function handle(message, sender) {
   if (message.type === "GET_PUBLIC_SETTINGS") return publicSettings(await loadSettings());
   if (message.type === "BEGIN_SESSION") {
     if (!sender.tab || sender.frameId !== 0) throw new Error("只支持主网页翻译。");
-    const settings = await loadSettings();
+    if (Object.hasOwn(message, "selection")) throw new Error("只能从插件弹窗选择 API 和模型。");
+    const settings = pendingStarts.get(sender.tab.id) ?? resolveTranslationSettings(await loadSettings());
+    pendingStarts.delete(sender.tab.id);
     assertConfigured(settings);
     await requireEndpointPermission(settings);
     await cancelTab(sender.tab.id);
     while (sessions.size >= 50) await cancelSession(sessions.keys().next().value);
     const sessionId = crypto.randomUUID();
-    const snapshot = { sessionId, tabId: sender.tab.id, documentId: sender.documentId, settings };
+    // Durable sessions only need the selected service's credentials, not every
+    // configured API key. Settings edits cannot mutate this translation run.
+    const snapshotSettings = { ...publicSettings(settings), prompt: settings.prompt };
+    if (settings.provider === "openai") Object.assign(snapshotSettings, { openaiEndpoint: settings.openaiEndpoint, openaiKey: settings.openaiKey, activeApiId: settings.activeApiId });
+    if (settings.provider === "google-cloud") snapshotSettings.googleCloudKey = settings.googleCloudKey;
+    const snapshot = { sessionId, tabId: sender.tab.id, documentId: sender.documentId, settings: snapshotSettings };
     await chrome.storage.session.set({ [sessionKey(sessionId)]: snapshot });
     sessions.set(sessionId, { ...snapshot, controllers: new Set() });
     return { settings: publicSettings(settings), sessionId };
@@ -133,20 +150,20 @@ async function handle(message, sender) {
   if (message.type === "GET_SETTINGS") return await loadSettings();
   if (message.type === "SAVE_SETTINGS") {
     const settings = normalizeSettings(message.settings);
-    await requireEndpointPermission(settings);
+    for (const api of settings.apiProfiles) await requireEndpointPermission({ provider: "openai", openaiEndpoint: api.endpoint });
     await chrome.storage.local.set({ settings });
     cache.clear();
     return publicSettings(settings);
   }
   if (message.type === "TEST_CONNECTION") {
-    const settings = normalizeSettings(message.settings);
+    const settings = resolveTranslationSettings(message.settings, message.selection);
     await requireEndpointPermission(settings);
     const translations = await queue.run(() => translateTexts(["Reading opens a window to the world."], settings, { retries: 0 }));
     return { translation: translations[0] };
   }
   if (message.type === "CLEAR_CACHE") { cache.clear(); return {}; }
   if (message.type === "OPEN_OPTIONS") { await chrome.runtime.openOptionsPage(); return {}; }
-  if (message.type === "TAB_ACTION") return await actOnTab(message.tabId, message.action);
+  if (message.type === "TAB_ACTION") return await actOnTab(message.tabId, message.action, message.selection);
   if (message.type === "TAB_STATUS") {
     try { return await chrome.tabs.sendMessage(message.tabId, { type: "LINGO_STATUS" }, { frameId: 0 }); }
     catch { return { enabled: false, translated: 0, failed: 0, pending: 0, total: 0 }; }

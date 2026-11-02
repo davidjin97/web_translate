@@ -1,8 +1,15 @@
 // Development-only Chrome API shim. This file is NEVER included in the extension.
 // Preview translations are deterministic fixtures, not live API calls.
-import { DEFAULT_SETTINGS, publicSettings } from "/extension/lib/settings.js";
+import { DEFAULT_SETTINGS, normalizeSettings, publicSettings } from "/extension/lib/settings.js";
 
-let settings = { ...DEFAULT_SETTINGS };
+// Optional fixture-only multi-API preview. Never contacts these services.
+let settings = normalizeSettings(new URLSearchParams(location.search).has("multi") ? {
+  provider: "openai", defaultApiId: "siliconflow",
+  apiProfiles: [
+    { id: "siliconflow", name: "硅基流动", endpoint: "https://api.siliconflow.cn/v1", key: "", models: ["Qwen/Qwen2.5-7B-Instruct", "Qwen/Qwen3-8B"], defaultModel: "Qwen/Qwen2.5-7B-Instruct" },
+    { id: "local-qwen", name: "本地 Qwen", endpoint: "http://localhost:11434/v1", key: "", models: ["qwen:7b", "qwen:14b"], defaultModel: "qwen:7b" }
+  ]
+} : DEFAULT_SETTINGS);
 const listeners = [];
 const fixtures = new Map([
   ["The quiet power of reading", "阅读，安静而有力量"],

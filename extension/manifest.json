@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Lingo · 双语网页翻译",
   "description": "在原文下方阅读译文。支持 Google 翻译、Google Cloud 和自定义 OpenAI 兼容模型。",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minimum_chrome_version": "114",
   "icons": { "16": "assets/icon16.png", "32": "assets/icon32.png", "48": "assets/icon48.png", "128": "assets/icon128.png" },
   "permissions": ["activeTab", "scripting", "storage", "contextMenus"],

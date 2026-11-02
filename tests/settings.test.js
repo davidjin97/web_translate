@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DEFAULT_SETTINGS, normalizeSettings, publicSettings, chatEndpoint, endpointPermissionPattern, assertConfigured } from "../extension/lib/settings.js";
+import { DEFAULT_SETTINGS, normalizeSettings, resolveTranslationSettings, publicSettings, chatEndpoint, endpointPermissionPattern, assertConfigured } from "../extension/lib/settings.js";
 
 test("defaults work without a key and unknown fields are discarded", () => {
   const settings = normalizeSettings({ injected: "no", targetLanguage: "ja" });
@@ -59,4 +59,62 @@ test("LLM and Google Cloud require keys, but localhost models may be keyless", (
   assert.throws(() => assertConfigured({ ...DEFAULT_SETTINGS, provider: "google-cloud" }), /Key/);
   assert.doesNotThrow(() => assertConfigured({ ...DEFAULT_SETTINGS, provider: "openai", openaiEndpoint: "http://127.0.0.1:11434/v1" }));
   assert.throws(() => assertConfigured({ ...DEFAULT_SETTINGS, provider: "openai", openaiKey: "test", openaiModel: "" }), /模型/);
+});
+
+const apiProfiles = [
+  { id: "first", name: "第一个 API", endpoint: "https://first.example/v1", key: "first-secret", models: ["model-a", "model-b"], defaultModel: "model-b" },
+  { id: "second", name: "内网 API", endpoint: "http://192.168.1.10:8000/v1", key: "second-secret", models: ["model-c", "model-d"], defaultModel: "model-c" }
+];
+test("legacy configuration migrates to one named API without losing credentials or model", () => {
+  const settings = normalizeSettings({ provider: "openai", openaiEndpoint: "http://gateway.internal/v1", openaiKey: "legacy-secret", openaiModel: "legacy-model" });
+  assert.deepEqual(settings.apiProfiles, [{ id: "default-api", name: "我的 API", endpoint: "http://gateway.internal/v1", key: "legacy-secret", models: ["legacy-model"], defaultModel: "legacy-model" }]);
+  assert.equal(settings.defaultApiId, "default-api");
+  assert.deepEqual(normalizeSettings(settings), settings);
+  assert.equal(normalizeSettings({ openaiModel: "" }).apiProfiles[0].defaultModel, DEFAULT_SETTINGS.openaiModel);
+});
+test("multiple APIs preserve independent models and derive aliases from the default", () => {
+  const settings = normalizeSettings({ provider: "openai", apiProfiles, defaultApiId: "second" });
+  assert.equal(settings.openaiEndpoint, apiProfiles[1].endpoint);
+  assert.equal(settings.openaiKey, "second-secret");
+  assert.equal(settings.openaiModel, "model-c");
+  assert.equal(normalizeSettings({ ...settings, openaiKey: "stale-key" }).openaiKey, "second-secret");
+  settings.apiProfiles[0].models.push("extra");
+  assert.equal(apiProfiles[0].models.length, 2);
+});
+test("temporary API/model selection does not mutate saved defaults", () => {
+  const saved = normalizeSettings({ provider: "openai", apiProfiles, defaultApiId: "first" });
+  const selected = resolveTranslationSettings(saved, { apiId: "second", model: "model-d", targetLanguage: "ja" });
+  assert.equal(selected.openaiEndpoint, apiProfiles[1].endpoint);
+  assert.equal(selected.openaiKey, "second-secret");
+  assert.equal(selected.openaiModel, "model-d");
+  assert.equal(selected.activeApiId, "second");
+  assert.equal(selected.defaultApiId, "first");
+  assert.equal(saved.openaiModel, "model-b");
+  assert.equal(saved.targetLanguage, "zh-CN");
+  assert.equal(resolveTranslationSettings(saved, { apiId: "second" }).openaiModel, "model-c");
+  assert.equal(resolveTranslationSettings(saved).openaiModel, "model-b");
+});
+test("public configuration strips every profile and secret, including inactive APIs", () => {
+  const safe = publicSettings(resolveTranslationSettings({ provider: "openai", apiProfiles, defaultApiId: "first" }, { apiId: "second", model: "model-d" }));
+  assert.equal(safe.apiId, "second");
+  assert.equal(safe.openaiModel, "model-d");
+  for (const text of ["secret", "first.example", "192.168.1.10", "内网", "apiProfiles", "prompt", "defaultApiId"]) assert.ok(!JSON.stringify(safe).includes(text));
+});
+test("selection only accepts configured API/model IDs and valid languages", () => {
+  const saved = { provider: "openai", apiProfiles, defaultApiId: "first" };
+  for (const selection of [{ apiId: "unknown" }, { apiId: "second", model: "model-a" }, { model: "missing" }, { endpoint: "https://evil.example" }, { key: "injected" }, { targetLanguage: "xx" }, { provider: "unknown" }, null, []]) {
+    assert.throws(() => resolveTranslationSettings(saved, selection));
+  }
+});
+test("nested API configuration validates limits, identities, URLs and default membership", () => {
+  for (const patch of [{ id: "" }, { name: " " }, { name: "x".repeat(81) }, { endpoint: "http://user:secret@example.com" }, { key: "x".repeat(513) }, { models: [] }, { models: ["a", "a"] }, { models: [" "] }, { models: ["x".repeat(201)] }, { models: Array(51).fill("a") }, { defaultModel: "missing" }]) {
+    assert.throws(() => normalizeSettings({ apiProfiles: [{ ...apiProfiles[0], ...patch }] }));
+  }
+  assert.throws(() => normalizeSettings({ apiProfiles: [] }));
+  assert.throws(() => normalizeSettings({ apiProfiles: Array(21).fill(apiProfiles[0]) }));
+  assert.throws(() => normalizeSettings({ apiProfiles: [apiProfiles[0], apiProfiles[0]] }));
+  assert.throws(() => normalizeSettings({ apiProfiles, defaultApiId: "unknown" }));
+  assert.throws(() => normalizeSettings({ apiProfiles: [apiProfiles[0], { ...apiProfiles[1], endpoint: "javascript:alert(1)" }] }));
+  const settings = normalizeSettings({ apiProfiles: [{ ...apiProfiles[0], injected: "not-allowed" }] });
+  assert.equal(Object.hasOwn(settings.apiProfiles[0], "injected"), false);
 });
