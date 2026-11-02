@@ -1,0 +1,10 @@
+import { cpSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+await import("./check.mjs");
+const extension = fileURLToPath(new URL("../extension", import.meta.url));
+const destination = fileURLToPath(new URL("../dist/lingo", import.meta.url));
+mkdirSync(destination, { recursive: true });
+cpSync(extension, destination, { recursive: true });
+execFileSync("zip", ["-r", "-q", "../lingo-v0.1.0.zip", "."], { cwd: destination });
+console.log(`Chrome unpacked extension: ${destination}\nZIP: ${fileURLToPath(new URL("../dist/lingo-v0.1.0.zip", import.meta.url))}`);

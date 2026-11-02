@@ -1,0 +1,16 @@
+{
+  "name": "lingo-web-translate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A local-first Manifest V3 bilingual webpage translator.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "check": "node scripts/check.mjs",
+    "package": "node scripts/package.mjs",
+    "demo": "node scripts/demo-server.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
